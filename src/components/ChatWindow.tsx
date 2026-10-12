@@ -1,21 +1,23 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, RotateCcw, Sparkles } from "lucide-react";
+import { Check, LayoutList, RotateCcw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Card, Progress } from "@/components/ui/primitives";
 import { ChatFormFields, FormSummary } from "@/components/ChatFormFields";
 import { ToolTrace } from "@/components/ToolTrace";
-import { ONBOARDING_STEPS } from "@/lib/flow";
+import { TEMPLATE_IDS, TEMPLATES, getTemplate, rewindToField } from "@/lib/flow";
 import type { UiMessage, FormValues } from "@/utils/ai-schemas";
 
 type ChatMsg = { role: "user" | "assistant"; text: string; ui?: UiMessage };
 
-const GREETING: ChatMsg = {
-  role: "assistant",
-  text: "Welcome! I'll get you onboarded in about a minute. Just say hello to begin.",
-};
+const storeKey = (t: string) => `formflow-v1:${t}`;
+
+interface Saved {
+  messages: ChatMsg[];
+  values: FormValues;
+}
 
 function TypingDots() {
   return (
@@ -33,7 +35,9 @@ function TypingDots() {
 }
 
 export function ChatWindow() {
-  const [messages, setMessages] = useState<ChatMsg[]>([GREETING]);
+  const [templateId, setTemplateId] = useState("onboarding");
+  const template = getTemplate(templateId);
+  const [messages, setMessages] = useState<ChatMsg[]>([{ role: "assistant", text: template.greeting }]);
   const [input, setInput] = useState("");
   const [values, setValues] = useState<FormValues>({});
   const [progress, setProgress] = useState(0);
@@ -41,21 +45,57 @@ export function ChatWindow() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
+  const [restored, setRestored] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
   const scrollDown = () => boxRef.current?.scrollTo({ top: 99999, behavior: "smooth" });
 
-  async function send(text: string, opts?: { values?: FormValues; answer?: { field: string; value: string } }) {
+  // F1 refresh-proof: restore this template's session on mount…
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(storeKey(templateId));
+      if (raw) {
+        const saved = JSON.parse(raw) as Saved;
+        if (saved.messages?.length) {
+          setMessages(saved.messages);
+          setValues(saved.values ?? {});
+          const total = template.steps.length;
+          setProgress(total ? (Object.keys(saved.values ?? {}).length / total) * 100 : 0);
+          setRestored(true);
+        }
+      }
+    } catch {
+      /* corrupted save — start fresh */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateId]);
+
+  // …and save every change.
+  useEffect(() => {
+    try {
+      const safe = messages.slice(-50); // cap size, drop nothing important
+      localStorage.setItem(storeKey(templateId), JSON.stringify({ messages: safe, values }));
+    } catch {
+      /* storage full/blocked — chat still works */
+    }
+  }, [messages, values, templateId]);
+
+  async function send(
+    text: string,
+    opts?: { values?: FormValues; answer?: { field: string; value: string }; silent?: boolean; template?: string }
+  ) {
+    const tid = opts?.template ?? templateId;
     setError(null);
     setBusy(true);
     const outgoingValues = opts?.values ?? values;
-    setMessages((prev) => [...prev, { role: "user", text }]);
+    if (!opts?.silent) setMessages((prev) => [...prev, { role: "user", text }]);
+    const history = opts?.silent ? messages : [...messages, { role: "user", text }];
     setInput("");
     scrollDown();
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: [...messages, { role: "user", text }], values: outgoingValues, answer: opts?.answer }),
+        body: JSON.stringify({ template: tid, messages: history, values: outgoingValues, answer: opts?.answer }),
       });
       if (!res.ok || !res.body) throw new Error(`Request failed (${res.status}). Please try again.`);
       const reader = res.body.getReader();
@@ -84,12 +124,8 @@ export function ChatWindow() {
             if (evt.token) pushAssistant(evt.token);
             else if (evt.ui) {
               const ui = evt.ui as UiMessage;
-              if (ui.type === "progress") {
-                setProgress((ui.completed / ui.total) * 100);
-                if (ui.completed === ui.total && ui.total > 0) {
-                  // keep local answers in sync with the server's count
-                }
-              } else if (ui.type === "tool_call") setTool({ tool: ui.tool, args: ui.args as Record<string, unknown> });
+              if (ui.type === "progress") setProgress((ui.completed / ui.total) * 100);
+              else if (ui.type === "tool_call") setTool({ tool: ui.tool, args: ui.args as Record<string, unknown> });
               else if (ui.type === "tool_result") setTool((t) => (t ? { ...t, result: ui.result } : t));
               else if (ui.type === "form_complete") {
                 pushAssistant("", ui);
@@ -99,12 +135,10 @@ export function ChatWindow() {
               throw new Error(evt.error.message ?? "Something went wrong.");
             }
           } catch (e) {
-            if (e instanceof Error && e.message !== "Something went wrong." && !/JSON/.test(e.message)) throw e;
+            if (e instanceof Error && !/JSON|Something went wrong/.test(e.message)) throw e;
           }
         }
       }
-      // Sync local answers: server is source of truth for count; merge any
-      // structured answer we just sent so the next turn carries it.
       if (opts?.answer) setValues((prev) => ({ ...prev, [opts.answer!.field]: opts.answer!.value }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something didn't go through.");
@@ -120,22 +154,77 @@ export function ChatWindow() {
     send(value, { values: nextValues, answer: { field, value } });
   }
 
-  function startOver() {
-    setMessages([GREETING]);
+  // F2 inline editing: rewind the flow to that field and re-ask silently.
+  function editField(field: string) {
+    const short = template.steps.find((s) => s.field === field)?.short ?? "that answer";
+    const nextValues = rewindToField(template.steps, values, field);
+    setValues(nextValues);
+    setDoneOpen(false);
+    setMessages((prev) => [...prev, { role: "assistant", text: `No problem — let's update your ${short.toLowerCase()}.` }]);
+    send("continue", { values: nextValues, silent: true });
+  }
+
+  function switchTemplate(id: string) {
+    if (id === templateId || busy) return;
+    setTemplateId(id);
     setValues({});
     setProgress(0);
     setTool(null);
     setError(null);
     setDoneOpen(false);
+    setRestored(false);
+    setMessages([{ role: "assistant", text: getTemplate(id).greeting }]);
   }
 
-  const doneCount = Math.round((progress / 100) * ONBOARDING_STEPS.length);
+  function startOver() {
+    try {
+      localStorage.removeItem(storeKey(templateId));
+    } catch {
+      /* ignore */
+    }
+    setMessages([{ role: "assistant", text: template.greeting }]);
+    setValues({});
+    setProgress(0);
+    setTool(null);
+    setError(null);
+    setDoneOpen(false);
+    setRestored(false);
+  }
+
+  const doneCount = Math.min(template.steps.length, Math.round((progress / 100) * template.steps.length));
 
   return (
     <div className="mx-auto w-full max-w-2xl">
+      {/* Template picker */}
+      <div className="mb-4 flex items-center gap-2">
+        <LayoutList className="h-4 w-4 text-muted-foreground" />
+        <div className="flex gap-1 rounded-lg border border-border bg-card p-1">
+          {TEMPLATE_IDS.map((id) => (
+            <button
+              key={id}
+              onClick={() => switchTemplate(id)}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                id === templateId ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {TEMPLATES[id].name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {restored && (
+        <button
+          onClick={() => setRestored(false)}
+          className="mb-3 w-full rounded-lg border border-primary/30 bg-accent/50 px-3 py-2 text-xs font-medium text-accent-foreground"
+        >
+          Welcome back — your progress was restored. Tap to dismiss.
+        </button>
+      )}
+
       {/* Stepper */}
       <ol className="mb-4 flex items-center gap-1">
-        {ONBOARDING_STEPS.map((s, i) => {
+        {template.steps.map((s, i) => {
           const state = i < doneCount ? "done" : i === doneCount ? "current" : "todo";
           return (
             <li key={s.field} className="flex flex-1 items-center gap-1 last:flex-none">
@@ -153,7 +242,7 @@ export function ChatWindow() {
               <span className={`hidden text-xs sm:inline ${state === "todo" ? "text-muted-foreground" : "font-medium"}`}>
                 {s.short}
               </span>
-              {i < ONBOARDING_STEPS.length - 1 && <div className="mx-1 h-px flex-1 bg-border" />}
+              {i < template.steps.length - 1 && <div className="mx-1 h-px flex-1 bg-border" />}
             </li>
           );
         })}
@@ -186,7 +275,9 @@ export function ChatWindow() {
               {m.ui && (m.ui.type === "input_request" || m.ui.type === "select_request") && (
                 <ChatFormFields message={m.ui} onSubmit={answerField} />
               )}
-              {m.ui?.type === "form_complete" && <FormSummary values={values} />}
+              {m.ui?.type === "form_complete" && (
+                <FormSummary values={values} templateId={templateId} onEdit={editField} />
+              )}
             </motion.div>
           ))}
         </AnimatePresence>
@@ -247,10 +338,10 @@ export function ChatWindow() {
               </div>
               <h2 className="mt-3 text-center text-xl font-bold">You&apos;re all set!</h2>
               <p className="mt-1 text-center text-sm text-muted-foreground">
-                Onboarding complete — here&apos;s a recap.
+                Tap the pencil on any row to fix it.
               </p>
               <div className="mt-4">
-                <FormSummary values={values} />
+                <FormSummary values={values} templateId={templateId} onEdit={editField} />
               </div>
               <div className="mt-5 flex gap-2">
                 <Button className="flex-1" onClick={() => setDoneOpen(false)}>Done</Button>

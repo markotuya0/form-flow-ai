@@ -7,7 +7,7 @@ export const InputRequestSchema = z.object({
   type: z.literal("input_request"),
   field: z.string(),
   label: z.string(),
-  inputType: z.enum(["text", "email", "number", "date"]).default("text"),
+  inputType: z.enum(["text", "email", "number", "date", "textarea"]).default("text"),
   required: z.boolean().default(true),
 });
 

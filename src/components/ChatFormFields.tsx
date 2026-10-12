@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { motion } from "framer-motion";
+import { AlertCircle, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Card } from "@/components/ui/primitives";
 import type { UiMessage, FormValues } from "@/utils/ai-schemas";
-import { ONBOARDING_STEPS } from "@/lib/flow";
+import { getTemplate } from "@/lib/flow";
 
 // Renders dynamic inputs when the AI emits input_request / select_request.
 export function ChatFormFields({
@@ -16,38 +18,64 @@ export function ChatFormFields({
 }) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [shake, setShake] = useState(0);
+
+  function fail(msg: string) {
+    setError(msg);
+    setShake((s) => s + 1); // retrigger the shake animation
+  }
 
   function validate(v: string): string | null {
     if ("required" in message && (message as { required?: boolean }).required && !v.trim())
-      return "This field is required.";
-    if (v.length > 254) return "That looks too long — please shorten it.";
+      return "This one's required — give it a go.";
+    if (v.length > 2000) return "That's a bit long — please shorten it.";
     if (message.type === "input_request" && message.inputType === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim()))
-      return "Enter a valid work email, e.g. ada@company.com.";
+      return "Hmm, that email doesn't look right — try ada@company.com.";
     return null;
   }
+
+  function submit() {
+    const err = validate(value);
+    if (err) return fail(err);
+    setError(null);
+    onSubmit(message.field, value.trim());
+  }
+
+  const isTextarea = message.type === "input_request" && message.inputType === "textarea";
 
   return (
     <Card className="mt-2 border-primary/30 bg-accent/40">
       <p className="text-sm font-medium">{message.label}</p>
       {message.type === "input_request" ? (
-        <div className="mt-2 flex gap-2">
-          <Input
-            type={message.inputType}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder={message.label}
-          />
-          <Button
-            onClick={() => {
-              const err = validate(value);
-              if (err) return setError(err);
-              setError(null);
-              onSubmit(message.field, value);
-            }}
-          >
-            Save
-          </Button>
-        </div>
+        <motion.div
+          key={shake}
+          animate={shake > 0 ? { x: [0, -10, 10, -6, 6, 0] } : {}}
+          transition={{ duration: 0.4 }}
+          className="mt-2"
+        >
+          <div className={isTextarea ? "" : "flex gap-2"}>
+            {isTextarea ? (
+              <textarea
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder="Describe what happened…"
+                rows={3}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+            ) : (
+              <Input
+                type={message.inputType === "date" ? "date" : message.inputType === "email" ? "email" : "text"}
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+                placeholder={message.label}
+              />
+            )}
+            <Button onClick={submit} className={isTextarea ? "mt-2" : ""}>
+              Save
+            </Button>
+          </div>
+        </motion.div>
       ) : (
         <div className="mt-2 flex flex-wrap gap-2">
           {message.options.map((opt) => (
@@ -57,24 +85,51 @@ export function ChatFormFields({
           ))}
         </div>
       )}
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-2 flex items-start gap-1.5 text-xs font-medium text-red-600">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {error}
+        </p>
+      )}
     </Card>
   );
 }
 
-export function FormSummary({ values }: { values: FormValues }) {
-  const rows = ONBOARDING_STEPS.filter((s) => s.field in values).map((s) => ({
+export function FormSummary({
+  values,
+  templateId,
+  onEdit,
+}: {
+  values: FormValues;
+  templateId: string;
+  onEdit?: (field: string) => void;
+}) {
+  const steps = getTemplate(templateId).steps;
+  const rows = steps.filter((s) => s.field in values).map((s) => ({
+    field: s.field,
     label: s.short,
     value: values[s.field],
   }));
   return (
     <Card className="mt-2">
       <p className="text-sm font-semibold">Here&apos;s what I captured</p>
-      <dl className="mt-2 space-y-1 text-sm">
+      <dl className="mt-2 space-y-1.5 text-sm">
         {rows.map((r) => (
-          <div key={r.label} className="flex justify-between gap-4">
+          <div key={r.field} className="group flex items-center justify-between gap-4">
             <dt className="text-muted-foreground">{r.label}</dt>
-            <dd className="font-medium">{r.value}</dd>
+            <dd className="flex items-center gap-1.5 font-medium">
+              <span className="max-w-48 truncate">{r.value}</span>
+              {onEdit && (
+                <button
+                  onClick={() => onEdit(r.field)}
+                  title={`Edit ${r.label}`}
+                  aria-label={`Edit ${r.label}`}
+                  className="rounded p-1 text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-secondary hover:text-foreground focus:opacity-100"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </dd>
           </div>
         ))}
       </dl>

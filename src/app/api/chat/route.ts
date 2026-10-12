@@ -5,29 +5,32 @@ import {
   applyAnswer,
   buildHandoff,
   currentStep,
+  getTemplate,
   isComplete,
-  ONBOARDING_STEPS,
+  isGreeting,
   tryFreeText,
   type Answer,
   type FormValues,
 } from "@/lib/flow";
 
 // POST /api/chat — SSE stream of {token} text chunks and {ui} structured
-// form events. Stateless: every turn carries {messages, values} plus an
-// optional structured {answer}. The server advances ONLY on the answer or
-// free-text in this payload — never on remembered state — so questions
-// can't repeat and answers can't arrive a turn late.
+// form events. Stateless: every turn carries {template, messages, values}
+// plus an optional structured {answer}. The server advances ONLY on the
+// answer or free-text in this payload — never on remembered state — so
+// questions can't repeat and answers can't arrive a turn late.
 export async function POST(req: NextRequest) {
   const requestId = randomUUID();
-  let body: { messages?: { role: string; text: string }[]; values?: FormValues; answer?: Answer };
+  let body: { template?: string; messages?: { role: string; text: string }[]; values?: FormValues; answer?: Answer };
   try {
     body = await req.json();
   } catch {
     return Response.json(
-      { error: { code: "BAD_REQUEST", message: "Body must be JSON with {messages, values}." }, requestId },
+      { error: { code: "BAD_REQUEST", message: "Body must be JSON." }, requestId },
       { status: 400 }
     );
   }
+  const template = getTemplate(body.template);
+  const steps = template.steps;
   let values: FormValues = body.values ?? {};
   const provider = getProvider();
 
@@ -36,7 +39,7 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       const send = (obj: unknown) =>
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-      const handoff = buildHandoff(values);
+      const handoff = buildHandoff(template.id, values);
       const timeout = setTimeout(() => {
         try {
           send({ error: { code: "TIMEOUT", message: "Taking too long — please retry." }, requestId });
@@ -54,7 +57,7 @@ export async function POST(req: NextRequest) {
       }
 
       function askStep() {
-        const step = currentStep(values)!;
+        const step = currentStep(values, steps)!;
         return {
           ui:
             step.kind === "select"
@@ -75,9 +78,9 @@ export async function POST(req: NextRequest) {
 
         // 1. Structured answer (field widget submitted): validate + merge.
         if (body.answer) {
-          const applied = applyAnswer(values, body.answer);
+          const applied = applyAnswer(steps, values, body.answer);
           if (!applied.ok) {
-            send({ ui: { type: "progress", completed: Object.keys(values).length, total: ONBOARDING_STEPS.length } });
+            send({ ui: { type: "progress", completed: Object.keys(values).length, total: steps.length } });
             for await (const t of tokens(applied.error)) send({ token: t });
             const s = applied.step;
             send({
@@ -91,25 +94,28 @@ export async function POST(req: NextRequest) {
           }
           values = applied.values;
         } else {
-          // 2. Free-typed text: accept it if it satisfies the current step.
+          // 2. Free-typed text: accept it if it satisfies the current step
+          // (but never treat an opening greeting as an answer).
           const lastUser = body.messages?.filter((m) => m.role === "user").at(-1)?.text;
-          if (lastUser) {
-            const matched = tryFreeText(values, lastUser);
+          if (lastUser && !(Object.keys(values).length === 0 && isGreeting(lastUser))) {
+            const matched = tryFreeText(steps, values, lastUser);
             if (matched) values = matched;
           }
         }
 
-        send({ ui: { type: "progress", completed: Object.keys(values).length, total: ONBOARDING_STEPS.length } });
+        send({ ui: { type: "progress", completed: Object.keys(values).length, total: steps.length } });
 
-        if (isComplete(values)) {
-          send({ ui: { type: "tool_call", tool: "verify", args: { email: values.email } } });
-          await new Promise((r) => setTimeout(r, 400));
-          send({ ui: { type: "tool_result", tool: "verify", result: { valid: true } } });
-          for await (const t of tokens("All set! Here's what I captured:")) send({ token: t });
+        if (isComplete(values, steps)) {
+          if (template.verifyField && values[template.verifyField]) {
+            send({ ui: { type: "tool_call", tool: "verify", args: { email: values[template.verifyField] } } });
+            await new Promise((r) => setTimeout(r, 400));
+            send({ ui: { type: "tool_result", tool: "verify", result: { valid: true } } });
+          }
+          for await (const t of tokens(template.completeText)) send({ token: t });
           send({ ui: { type: "form_complete", summary: values } });
         } else {
           const greeted = (body.messages?.length ?? 0) > 1;
-          for await (const t of tokens(greeted ? "Nice — next one." : "Let's get you set up.")) send({ token: t });
+          for await (const t of tokens(greeted ? "Nice — next one." : "Let's get going.")) send({ token: t });
           send(askStep());
         }
         send("[DONE]");

@@ -6,9 +6,9 @@ import "./globals.css";
 const inter = Inter({ variable: "--font-sans", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "FormFlow AI — Onboarding without the boring form",
+  title: "FormFlow AI — Forms without the boring form",
   description:
-    "FormFlow AI turns employee onboarding into a quick guided conversation. Answer a few questions and you're done.",
+    "FormFlow AI turns long forms into quick guided conversations. Pick onboarding or bug reports, answer a few questions, done.",
 };
 
 export default function RootLayout({

@@ -3,10 +3,12 @@
 Turn long, boring forms into a quick conversation. FormFlow AI guides each person step by step and collects clean, validated answers — no more half-finished paperwork.
 
 ## What it does
-- Conversational onboarding: name, work email, role, start date
-- Smart validation as you type (including email checks)
+- Two forms: **Employee onboarding** (name, work email, role, start date) and **Bug report** (title, email, severity, details) — switch anytime from the picker
+- Conversational UI: one question at a time, real inputs inside the chat
+- Smart validation with a shake + friendly hint when something's off
+- Your progress survives a refresh; tap the pencil on any answer to fix it
 - Step tracker + progress bar so people know where they are
-- Celebration recap at the end you can copy into HR tools
+- Celebration recap at the end with Start over
 
 ## Getting started
 ```bash
@@ -17,7 +19,7 @@ npm run dev
 
 ## Demo mode vs live AI
 
-Out of the box it runs in **demo mode**: the built-in guide knows the 4 onboarding questions, so everything works with no key and no cost. To plug in a real model:
+Out of the box it runs in **demo mode**: the built-in guide knows every form's questions, so everything works with no key and no cost. To plug in a real model:
 
 ```bash
 cp .env.example .env.local
