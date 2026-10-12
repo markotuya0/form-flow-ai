@@ -20,7 +20,7 @@ import {
 // questions can't repeat and answers can't arrive a turn late.
 export async function POST(req: NextRequest) {
   const requestId = randomUUID();
-  let body: { template?: string; messages?: { role: string; text: string }[]; values?: FormValues; answer?: Answer };
+  let body: { template?: string; action?: string; messages?: { role: string; text: string }[]; values?: FormValues; answer?: Answer };
   try {
     body = await req.json();
   } catch {
@@ -77,6 +77,18 @@ export async function POST(req: NextRequest) {
         }
 
         // 1. Structured answer (field widget submitted): validate + merge.
+        // 2. Free-typed text: accept it if it satisfies the current step
+        //    (but never treat an opening greeting as an answer).
+        // Either way, remember WHAT was saved so the reply echoes it —
+        // the user should always see what got recorded.
+        let savedNote: string | null = null;
+        const shorts = (list: readonly { short: string }[]) =>
+          list.length > 1
+            ? `${list.slice(0, -1).map((s) => s.short).join(", ")} and ${list[list.length - 1].short}`
+            : list[0]?.short ?? "";
+        const note = (short: string, value: string) =>
+          `Noted "${value.length > 60 ? value.slice(0, 60) + "…" : value}" for ${short}.`;
+
         if (body.answer) {
           const applied = applyAnswer(steps, values, body.answer);
           if (!applied.ok) {
@@ -93,13 +105,25 @@ export async function POST(req: NextRequest) {
             return;
           }
           values = applied.values;
+          const step = steps.find((s) => s.field === body.answer!.field)!;
+          savedNote = note(step.short, applied.values[step.field]);
         } else {
-          // 2. Free-typed text: accept it if it satisfies the current step
-          // (but never treat an opening greeting as an answer).
           const lastUser = body.messages?.filter((m) => m.role === "user").at(-1)?.text;
-          if (lastUser && !(Object.keys(values).length === 0 && isGreeting(lastUser))) {
+          const emptyStart = Object.keys(values).length === 0;
+          if (lastUser && !(emptyStart && isGreeting(lastUser))) {
+            const step = currentStep(values, steps);
             const matched = tryFreeText(steps, values, lastUser);
-            if (matched) values = matched;
+            if (matched && step) {
+              values = matched;
+              savedNote = note(step.short, matched[step.field]);
+            } else if (step && body.action !== "edit") {
+              // Text that answers nothing: say so plainly, then re-ask.
+              send({ ui: { type: "progress", completed: Object.keys(values).length, total: steps.length } });
+              for await (const t of tokens("I didn't quite catch that — let's try this one again.")) send({ token: t });
+              send(askStep());
+              send("[DONE]");
+              return;
+            }
           }
         }
 
@@ -114,8 +138,18 @@ export async function POST(req: NextRequest) {
           for await (const t of tokens(template.completeText)) send({ token: t });
           send({ ui: { type: "form_complete", summary: values } });
         } else {
-          const greeted = (body.messages?.length ?? 0) > 1;
-          for await (const t of tokens(greeted ? "Nice — next one." : "Let's get going.")) send({ token: t });
+          // Transition line: always tell the user where they stand.
+          // Edit-rewinds already explained themselves client-side — just ask.
+          if (body.action !== "edit") {
+            if (savedNote) {
+              for await (const t of tokens(savedNote)) send({ token: t });
+            } else if (Object.keys(body.values ?? {}).length === 0) {
+              // First turn: show the whole plan so nothing is a surprise.
+              for await (const t of tokens(`I'll ask about ${shorts(steps)}. Let's start.`)) send({ token: t });
+            } else {
+              for await (const t of tokens("Let's keep going.")) send({ token: t });
+            }
+          }
           send(askStep());
         }
         send("[DONE]");

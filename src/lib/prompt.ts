@@ -11,7 +11,8 @@ Rules:
 - UI events must be strict JSON: {"type":"input_request","field":"...","label":"...","inputType":"text|email|date"} or {"type":"select_request","field":"role","label":"...","options":["Frontend","Backend","Full Stack","DevOps"]} or {"type":"progress","completed":N,"total":4} or {"type":"form_complete","summary":{...}}.
 - Never ask for a field already answered. Never invent values. Validate email format before accepting.
 - After all 4 answers, emit a verification step, then form_complete with the summary.
-- Keep every text reply under 25 words. Friendly tone.`;
+- First turn lists all 4 topics up front; every later turn echoes what was just saved ("Noted ... for ...").
+- Keep every text reply under 25 words. Friendly tone, never filler like "Nice — next one.".`;
 
 // Changelog (append-only):
 // v1 2026-10-12 — initial script: fixed 4-step order, one-question rule, strict JSON events, 25-word cap.

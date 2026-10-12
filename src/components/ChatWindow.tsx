@@ -81,7 +81,7 @@ export function ChatWindow() {
 
   async function send(
     text: string,
-    opts?: { values?: FormValues; answer?: { field: string; value: string }; silent?: boolean; template?: string }
+    opts?: { values?: FormValues; answer?: { field: string; value: string }; silent?: boolean; template?: string; action?: string }
   ) {
     const tid = opts?.template ?? templateId;
     setError(null);
@@ -95,7 +95,7 @@ export function ChatWindow() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ template: tid, messages: history, values: outgoingValues, answer: opts?.answer }),
+        body: JSON.stringify({ template: tid, action: opts?.action, messages: history, values: outgoingValues, answer: opts?.answer }),
       });
       if (!res.ok || !res.body) throw new Error(`Request failed (${res.status}). Please try again.`);
       const reader = res.body.getReader();
@@ -149,6 +149,7 @@ export function ChatWindow() {
   }
 
   function answerField(field: string, value: string) {
+    if (busy) return; // double-tap guard: one submit per question
     const nextValues = { ...values, [field]: value };
     setValues(nextValues);
     send(value, { values: nextValues, answer: { field, value } });
@@ -161,7 +162,7 @@ export function ChatWindow() {
     setValues(nextValues);
     setDoneOpen(false);
     setMessages((prev) => [...prev, { role: "assistant", text: `No problem — let's update your ${short.toLowerCase()}.` }]);
-    send("continue", { values: nextValues, silent: true });
+    send("continue", { values: nextValues, silent: true, action: "edit" });
   }
 
   function switchTemplate(id: string) {
@@ -273,7 +274,7 @@ export function ChatWindow() {
                 </div>
               )}
               {m.ui && (m.ui.type === "input_request" || m.ui.type === "select_request") && (
-                <ChatFormFields message={m.ui} onSubmit={answerField} />
+                <ChatFormFields message={m.ui} onSubmit={answerField} disabled={busy} />
               )}
               {m.ui?.type === "form_complete" && (
                 <FormSummary values={values} templateId={templateId} onEdit={editField} />

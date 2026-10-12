@@ -12,9 +12,11 @@ import { getTemplate } from "@/lib/flow";
 export function ChatFormFields({
   message,
   onSubmit,
+  disabled,
 }: {
   message: Extract<UiMessage, { type: "input_request" | "select_request" }>;
   onSubmit: (field: string, value: string) => void;
+  disabled?: boolean;
 }) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +62,8 @@ export function ChatFormFields({
                 onChange={(e) => setValue(e.target.value)}
                 placeholder="Describe what happened…"
                 rows={3}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                disabled={disabled}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
               />
             ) : (
               <Input
@@ -69,9 +72,10 @@ export function ChatFormFields({
                 onChange={(e) => setValue(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && submit()}
                 placeholder={message.label}
+                disabled={disabled}
               />
             )}
-            <Button onClick={submit} className={isTextarea ? "mt-2" : ""}>
+            <Button onClick={submit} disabled={disabled} className={isTextarea ? "mt-2" : ""}>
               Save
             </Button>
           </div>
@@ -79,7 +83,7 @@ export function ChatFormFields({
       ) : (
         <div className="mt-2 flex flex-wrap gap-2">
           {message.options.map((opt) => (
-            <Button key={opt} onClick={() => onSubmit(message.field, opt)}>
+            <Button key={opt} disabled={disabled} onClick={() => onSubmit(message.field, opt)}>
               {opt}
             </Button>
           ))}
