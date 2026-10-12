@@ -226,6 +226,14 @@ export function ChatWindow() {
             </button>
           ))}
         </div>
+        <button
+          onClick={startOver}
+          title="Clear this form and start over"
+          className="ml-auto flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium text-muted-foreground transition hover:text-foreground"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          Reset
+        </button>
       </div>
 
       {restored && (
