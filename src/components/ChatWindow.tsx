@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Card, Progress } from "@/components/ui/primitives";
 import { ChatFormFields, FormSummary } from "@/components/ChatFormFields";
 import { ToolTrace } from "@/components/ToolTrace";
-import { TEMPLATE_IDS, TEMPLATES, getTemplate, rewindToField } from "@/lib/flow";
+import { TEMPLATE_IDS, TEMPLATES, currentStep, getTemplate, rewindToField } from "@/lib/flow";
 import type { UiMessage, FormValues } from "@/utils/ai-schemas";
 
 type ChatMsg = { role: "user" | "assistant"; text: string; ui?: UiMessage };
@@ -124,8 +124,13 @@ export function ChatWindow() {
             if (evt.token) pushAssistant(evt.token);
             else if (evt.ui) {
               const ui = evt.ui as UiMessage;
-              if (ui.type === "progress") setProgress((ui.completed / ui.total) * 100);
-              else if (ui.type === "tool_call") setTool({ tool: ui.tool, args: ui.args as Record<string, unknown> });
+              if (ui.type === "progress") {
+                setProgress((ui.completed / ui.total) * 100);
+                // Server is source of truth: adopt its answers verbatim.
+                // This heals any client/server drift (free-text answers,
+                // rewinds, retries) so stuck loops can't happen.
+                if (ui.values) setValues(ui.values);
+              } else if (ui.type === "tool_call") setTool({ tool: ui.tool, args: ui.args as Record<string, unknown> });
               else if (ui.type === "tool_result") setTool((t) => (t ? { ...t, result: ui.result } : t));
               else if (ui.type === "form_complete") {
                 pushAssistant("", ui);
@@ -193,6 +198,15 @@ export function ChatWindow() {
   }
 
   const doneCount = Math.min(template.steps.length, Math.round((progress / 100) * template.steps.length));
+  // Instruction-first input: the box always tells you what to type.
+  // Option steps lock typing — the answer lives in the buttons above.
+  const activeStep = currentStep(values, template.steps);
+  const inputLocked = busy || !activeStep || activeStep.kind === "select";
+  const placeholder = !activeStep
+    ? "You're all set!"
+    : activeStep.kind === "select"
+      ? `Choose an option above — ${activeStep.label}`
+      : activeStep.label;
 
   return (
     <div className="mx-auto w-full max-w-2xl">
@@ -307,11 +321,11 @@ export function ChatWindow() {
         <Input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && input.trim() && !busy && send(input.trim())}
-          placeholder="Type a message…"
-          disabled={busy}
+          onKeyDown={(e) => e.key === "Enter" && input.trim() && !inputLocked && send(input.trim())}
+          placeholder={placeholder}
+          disabled={inputLocked}
         />
-        <Button disabled={busy || !input.trim()} onClick={() => send(input.trim())}>
+        <Button disabled={inputLocked || !input.trim()} onClick={() => send(input.trim())}>
           {busy ? "…" : "Send"}
         </Button>
       </div>

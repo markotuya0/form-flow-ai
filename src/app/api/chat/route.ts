@@ -56,6 +56,12 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      function progress() {
+        return {
+          ui: { type: "progress", completed: Object.keys(values).length, total: steps.length, values },
+        };
+      }
+
       function askStep() {
         const step = currentStep(values, steps)!;
         return {
@@ -89,10 +95,13 @@ export async function POST(req: NextRequest) {
         const note = (short: string, value: string) =>
           `Noted "${value.length > 60 ? value.slice(0, 60) + "…" : value}" for ${short}.`;
 
-        if (body.answer) {
+        // Late/duplicate submit on an already-complete form (double-tap race):
+        // skip straight to the recap — never the "pick up where we left off" loop.
+        const alreadyComplete = isComplete(values, steps);
+        if (body.answer && !alreadyComplete) {
           const applied = applyAnswer(steps, values, body.answer);
           if (!applied.ok) {
-            send({ ui: { type: "progress", completed: Object.keys(values).length, total: steps.length } });
+            send(progress());
             for await (const t of tokens(applied.error)) send({ token: t });
             const s = applied.step;
             send({
@@ -107,7 +116,7 @@ export async function POST(req: NextRequest) {
           values = applied.values;
           const step = steps.find((s) => s.field === body.answer!.field)!;
           savedNote = note(step.short, applied.values[step.field]);
-        } else {
+        } else if (!body.answer) {
           const lastUser = body.messages?.filter((m) => m.role === "user").at(-1)?.text;
           const emptyStart = Object.keys(values).length === 0;
           if (lastUser && !(emptyStart && isGreeting(lastUser))) {
@@ -118,7 +127,7 @@ export async function POST(req: NextRequest) {
               savedNote = note(step.short, matched[step.field]);
             } else if (step && body.action !== "edit") {
               // Text that answers nothing: say so plainly, then re-ask.
-              send({ ui: { type: "progress", completed: Object.keys(values).length, total: steps.length } });
+              send(progress());
               for await (const t of tokens("I didn't quite catch that — let's try this one again.")) send({ token: t });
               send(askStep());
               send("[DONE]");
@@ -127,14 +136,16 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        send({ ui: { type: "progress", completed: Object.keys(values).length, total: steps.length } });
+        send(progress());
 
         if (isComplete(values, steps)) {
+          // Fresh completion OR idempotent re-completion: verify + recap.
           if (template.verifyField && values[template.verifyField]) {
             send({ ui: { type: "tool_call", tool: "verify", args: { email: values[template.verifyField] } } });
             await new Promise((r) => setTimeout(r, 400));
             send({ ui: { type: "tool_result", tool: "verify", result: { valid: true } } });
           }
+          if (savedNote) for await (const t of tokens(savedNote)) send({ token: t });
           for await (const t of tokens(template.completeText)) send({ token: t });
           send({ ui: { type: "form_complete", summary: values } });
         } else {

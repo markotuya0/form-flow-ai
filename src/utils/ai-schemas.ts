@@ -22,6 +22,10 @@ export const ProgressSchema = z.object({
   type: z.literal("progress"),
   completed: z.number(),
   total: z.number(),
+  // Authoritative answers as merged by the server this turn.
+  // The client must adopt these verbatim — the server is the
+  // single source of truth, which makes drift (and stuck loops) impossible.
+  values: z.record(z.string(), z.string()).optional(),
 });
 
 export const ToolCallSchema = z.object({
