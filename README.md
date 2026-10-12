@@ -3,10 +3,10 @@
 Turn long, boring forms into a quick conversation. FormFlow AI guides each person step by step and collects clean, validated answers — no more half-finished paperwork.
 
 ## What it does
-- Two forms: **Employee onboarding** (name, work email, role, start date) and **Bug report** (title, email, severity, details) — switch anytime from the picker
+- Three forms: **Employee onboarding**, **Bug report**, and **Support ticket** — switch anytime from the picker
 - Conversational UI: one question at a time, real inputs inside the chat
 - Smart validation with a shake + friendly hint when something's off
-- Your progress survives a refresh; tap the pencil on any answer to fix it
+- Your progress survives a refresh; tap the pencil on any answer to fix it, or copy the recap in one click
 - Step tracker + progress bar so people know where they are
 - Celebration recap at the end with Start over
 

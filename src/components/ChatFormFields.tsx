@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { AlertCircle, Pencil } from "lucide-react";
+import { AlertCircle, Check, Copy, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Card } from "@/components/ui/primitives";
 import type { UiMessage, FormValues } from "@/utils/ai-schemas";
@@ -110,9 +110,37 @@ export function FormSummary({
     label: s.short,
     value: values[s.field],
   }));
+  const [copied, setCopied] = useState(false);
+
+  async function copyAll() {
+    const text = rows.map((r) => `${r.label}: ${r.value}`).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // clipboard API blocked (permissions/iframe) — legacy fallback
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
   return (
     <Card className="mt-2">
-      <p className="text-sm font-semibold">Here&apos;s what I captured</p>
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold">Here&apos;s what I captured</p>
+        <button
+          onClick={copyAll}
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+        >
+          {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? "Copied!" : "Copy"}
+        </button>
+      </div>
       <dl className="mt-2 space-y-1.5 text-sm">
         {rows.map((r) => (
           <div key={r.field} className="group flex items-center justify-between gap-4">

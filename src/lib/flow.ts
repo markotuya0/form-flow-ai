@@ -66,6 +66,27 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     ],
     completeText: "Thanks! Here's the report I'll file:",
   },
+  support: {
+    id: "support",
+    name: "Support ticket",
+    greeting: "Happy to help! Four quick questions and your ticket is in the queue.",
+    steps: [
+      { field: "fullName", label: "What is your full name?", short: "Name", kind: "text", required: true, maxLength: 100 },
+      { field: "email", label: "What email should we reply to?", short: "Email", kind: "email", required: true, maxLength: 254 },
+      {
+        field: "topic",
+        label: "What's it about?",
+        short: "Topic",
+        kind: "select",
+        required: true,
+        maxLength: 20,
+        options: ["Billing", "Technical", "Account", "Other"],
+      },
+      { field: "message", label: "Tell us what's going on.", short: "Message", kind: "textarea", required: true, maxLength: 2000 },
+    ],
+    verifyField: "email",
+    completeText: "Ticket received! Here's a copy for your records:",
+  },
 };
 
 export const TEMPLATE_IDS = Object.keys(TEMPLATES);
